@@ -5,15 +5,21 @@ from datetime import datetime
 
       
 
+
 class clsRegex :
 
     vpattern=None
     vstring =None
+    vstringdic = None
+    vstringfieldname =None
 
-    def __init__(self , ppattern=None , pstring=None):
+    def __init__(self , ppattern=None , pstring=None , pstringfieldname =None):
 
         self.vpattern = ppattern
-        self.vstring = pstring
+        self.vstringdic = pstring 
+        self.vstring = pstring[pstringfieldname]
+        self.vstringfieldname = pstringfieldname
+
 
     def _regex_pattern_string (self ):
 
@@ -21,19 +27,32 @@ class clsRegex :
 
         for forloop_pattern in self.vpattern:
             
-            pattern = re.compile(forloop_pattern['pattern_keys'], re.I | re.MULTILINE)
+            try:
+                
+                pattern = re.compile(forloop_pattern['pattern_keys'], re.I | re.MULTILINE)
+                matched = pattern.finditer(self.vstring )
+
+            except Exception:
             
-            matched = pattern.finditer(self.vstring )
+                return None
+            
+
+
 
             for forloop in matched:
                 
                 ex_result ={}                
                 
+                #패턴 엑셀의 모든 필드를 결과에 저장
                 for forloopkey in forloop_pattern:
                     ex_result[forloopkey] = forloop_pattern[forloopkey]
-                    #좌표,문구 추출
-                
+                    
+                #rowdata 엑셀의 모든 필드를 결과에 저장
+                for fieldname in self.vstringdic.keys():
+                    ex_result[fieldname] = self.vstringdic[fieldname]
+                        
 
+                # 레젝스 결과들을 추가 필드에 저장
                 ex_result['context_words'] = bool(ex_result['context_words'])
                 ex_result['context'] = None
                 ex_result['span'] = forloop.span()
@@ -72,7 +91,7 @@ class clsRegex :
             return False
         
 
-    def _getRegexFirstWords ( self , ppattern , pstring):
+    def _getRegexFirstWords ( self , ppattern , pstring ):
 
         try:
 
@@ -104,7 +123,7 @@ class clsRegex :
         return maxIndex
 
 
-    def _mergingResult(self , presult  ):
+    def _mergingResult( self , presult  ):
 
         cursor = 0
         maxindex = len ( presult ) -1
@@ -258,10 +277,15 @@ class clsRegex :
 
     def _getFilteringResult ( self ,presultList , pfilter):
         
+
+        #사용하지 않음 , 모든 패턴,로우데이터 필드들을 결과로 반환 할 것이기 때문에
         #관심있는 필드만 추출하여 [{}] 형태로 반환
         target_keys =pfilter
-        result =[]
+        
+        result =presultList
 
+
+        '''
         for fordic in presultList:
             selected_values = {}
             for key in target_keys:
@@ -269,6 +293,7 @@ class clsRegex :
                     selected_values[key] = fordic[key]
 
             result.append(selected_values)
+        '''
 
         return result
 
@@ -280,8 +305,10 @@ class clsRegex :
         #패턴식들과 문장으로 정규식 실행
         result = self._regex_pattern_string ()
 
-        #결과는 x좌표를 기준으로 오름차순 정렬
-        result = sorted ( result , key =lambda p: p['span'][0])
+
+        #결과는 x좌표 오름차순 , pattern_keys 길이 내림차순
+        result = sorted ( result ,   key =lambda p: str(p['span'][0]).zfill(10)  + str( 1000000 - len (p['pattern_keys'])).zfill(100) ) 
+
 
         #좌표중복제거 등
         self._mergingResult ( result )
@@ -299,11 +326,6 @@ class clsRegex :
 
 # excel import , export ###############################################################
 class clsRegexExcel:
-
-    '''
-    d = regexExcel.importExcel ('C:/Users/soshi/Desktop/20230810_regex_안치형/pattern_dict.xlsx' ) 
-    regexExcel.exportExcel (d)
-    '''
 
     def __init__ ( self ):
         pass
@@ -333,6 +355,7 @@ class clsRegexExcel:
 
 
 
+
 def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pExportRowCount=1000 ):
 
 
@@ -348,7 +371,7 @@ def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pE
         if  i in vpatterns[0]:
             pass       
         else:
-            print (i +  "유효하지 않음")
+            print ( "pattern excel file 에 '" + i + "' 필드가 없습니다.")
             exit()
 
 
@@ -371,16 +394,17 @@ def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pE
         
     
     now = datetime.now()
-    exportfilename = now.strftime("%Y_%m_%d_%H_%M_%S")
+    exportfilename = now.strftime("%Y%m%d%H%M%S")
 
     vresult = []
     vctn =1
     for forstring in vstrings:
         
         
-        exportfilename =  now.strftime("%Y_%m_%d_%H_%M_%S") + '__' + str(vctn) + '.xlsx' 
+        exportfilename =  now.strftime("%Y%m%d%H%M%S") + '_' + str(vctn) + '.xlsx' 
 
-        obj = clsRegex( vpatterns , forstring[vfieldname_strings] )
+        obj = clsRegex( vpatterns , forstring ,vfieldname_strings )
+
         vresult = vresult + obj.run()
 
         if len( vresult ) >= pExportRowCount :
@@ -395,8 +419,3 @@ def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pE
     clsRegexExcel.exportExcel (vresult , exportfilename  )
 
     
-
-
-
-
-
