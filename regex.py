@@ -2,7 +2,7 @@ import re
 import pandas as pd
 import numpy as np
 from datetime import datetime
-
+import os
       
 
 
@@ -18,24 +18,45 @@ class clsRegex :
         self.vpattern = ppattern
         self.vstringdic = pstring 
         self.vstring = pstring[pstringfieldname]
+        self.vstringHeadrange = None
         self.vstringfieldname = pstringfieldname
 
 
     def _regex_pattern_string (self ):
 
         result =[] 
+        vHeadRange = ''
 
         for forloop_pattern in self.vpattern:
             
             try:
-                
+
+                # pattern_headers 에 값이 없다면 문장전체가 대상
+                # 값이 있는데 매치되는 것이 없다면 regex skip
+
+                if len('' if forloop_pattern['pattern_headers'] is None else forloop_pattern['pattern_headers'].strip(' ') ) > 0:
+                    
+                    vHeadRange =  self._getRegexHeaderRange (  forloop_pattern['pattern_headers'] , self.vstring  )
+
+                else:
+                    
+                    vHeadRange = self.vstring
+                               
+
+                if len ( '' if vHeadRange is None else vHeadRange.strip(' ') ) < 1 :
+                    self.vstringHeadrange = ''
+                else:
+                    self.vstringHeadrange = vHeadRange
+
+
                 pattern = re.compile(forloop_pattern['pattern_keys'], re.I | re.MULTILINE)
-                matched = pattern.finditer(self.vstring )
+                matched = pattern.finditer(self.vstringHeadrange )
 
             except Exception:
             
                 return None
             
+
 
 
 
@@ -53,15 +74,14 @@ class clsRegex :
                         
 
                 # 레젝스 결과들을 추가 필드에 저장
-                ex_result['context_words'] = bool(ex_result['context_words'])
-                
+                ex_result['context_words'] = bool(ex_result['context_words'])                
                 ex_result['span'] = forloop.span()
                 ex_result['pre-match'] = None
                 ex_result['match'] = forloop.group()
                 ex_result['next-match'] = None
                 ex_result['isduplication'] = False
+                ex_result['headrange'] = self.vstringHeadrange
                 ex_result['context'] = None
-                
                 
                 result.append (ex_result)
 
@@ -105,6 +125,28 @@ class clsRegex :
             print ('error')
             return None    
 
+
+    def _getRegexHeaderRange ( self , ppattern , pstring ):
+
+        vfrom = None
+        vto =None
+        
+        try:
+
+            pattern = re.compile(ppattern, re.I | re.MULTILINE)
+            matched = pattern.finditer(pstring)
+            
+            for forloop in matched:
+                return pstring[forloop.span()[0]:]
+
+
+            return None
+        except:
+            return None    
+
+
+
+
     def _nextIndex ( self , pcurrentIndex ,  presult , maxIndex ) :
         '''
             다음 노드를 찾는데 좌표가 겹치지 않는 다음 노드를 찾아 반환
@@ -114,7 +156,7 @@ class clsRegex :
 
         for i in range ( pcurrentIndex  , maxIndex ):
             
-            if presult[i]['isduplication'] == False:
+            if presult[i]['context_words'] == False and presult[i]['isduplication'] == False:
 
                 return i
             else:
@@ -126,62 +168,84 @@ class clsRegex :
     def _mergingResult( self , presult  ):
 
         cursor = 0
-        maxindex = len ( presult ) -1
+        #maxindex = len ( presult ) -1 #context_words != 1 인것에 한해서만 길이를 측정한다.
+
+        maxindex = len([d for d in presult if bool(d['context_words']) == False]) - 1
         nextX =None
         context =None
         nextIndex = None 
+
+
+        for index , value in enumerate ( presult ):
+            #중복체크제거
+            if index + 1 <= maxindex :
+                
+                if self._deduplication(presult[index]['span'] ,presult[index +1]['span'] ) == True :
+                    
+                    presult[index +1]['isduplication'] = True # 이 경우
+
+
 
         for index , value in enumerate ( presult ):
 
 
             if bool(value['context_words']) == True :
-                
+
+                #해당 노드가 context_words 인경우 키맵에 개입하지 않고
+                # context 단어만 추출하여 메모리에 가지고 있는다.
                 if value['key_values'] is not None and len( str(value['key_values']) ) > 0:
                     context = value['key_values']
                 else:
                     context = value['match']
 
+                                 
+
+
+            elif bool(value['isduplication']) == True :
+                
+                #중복인 경우 처리하지 않고 skip
+                pass
+
             else:
-                ##################################################
-                # bool(value['context_words']) == Frue 인경우만
-
-
-                #중복체크제거
-                if index + 1 <= maxindex :
-                    
-                    if self._deduplication(presult[index]['span'] ,presult[index +1]['span'] ) == True :
-                        
-                        presult[index +1]['isduplication'] = True # 이 경우
-
-
 
                 #중복체크 이후에 nextIndex 를 찾아야 하는 이유가 있음
                 #nextIndex 는 isduplication ==False 인 노드
                 nextIndex = self._nextIndex (index , presult , maxindex)
 
 
-                #중복 isduplication ==True 인경우에는 
 
                 #처음 시작
                 if cursor ==0  and value['context_words'] == False and value['isduplication'] == False :
                 
 
-                    value['pre-match'] = self.vstring [0 : value['span'][0]]
+                    value['pre-match'] = value['headrange'][0 : value['span'][0]]
 
                     value ['context'] = context 
 
                     nextX = presult[nextIndex]['span'][0]
 
-                    value ['next-match'] = self.vstring [ value['span'][1] : nextX ]
+                    if value['span'][1] >= nextX : 
+                        value ['next-match'] = value['headrange'][ value['span'][1]: ]
+                    else: 
+                        value ['next-match'] = value['headrange'][ value['span'][1] : nextX ]
+
 
                     #키-값 추출
                     #키-추출
+                    
+                    value['extract-keyrange'] = value['match']  
+                
                     if value['key_values'] is None or len ( str(value['key_values']) ) < 1 :
                         value['extract-key'] = value ['match']
                     else:
                         value['extract-key'] = value ['key_values']
 
+
+
                     #값-추출
+
+                    value['extract-valuerange'] = value ['next-match']
+
                     if value['pattern_structured_values'] is None or len ( str(value['pattern_structured_values']) ) < 1 :
                         
                         value['extract-value'] = value ['next-match']
@@ -207,19 +271,29 @@ class clsRegex :
                     
                     nextX = presult[nextIndex]['span'][0]
 
-                    value ['next-match'] = self.vstring [ value['span'][1] : nextX ]
+
+                    if value['span'][1] >= nextX : 
+                        value ['next-match'] = value['headrange'][ value['span'][1]: ]
+                    else: 
+                        value ['next-match'] = value['headrange'][ value['span'][1] : nextX ]
+
 
                     value ['context'] = context 
 
 
                   #키-값 추출-----------------------------------------------------------------------------------------------------
                     #키-추출
+
+                    value['extract-keyrange'] = value['match']  
+
                     if value['key_values'] is None or len ( str(value['key_values']) ) < 1 :
                         value['extract-key'] = value ['match']
                     else:
                         value['extract-key'] = value ['key_values']
 
                     #값-추출
+                    value['extract-valuerange'] = value ['next-match']
+
                     if value['pattern_structured_values'] is None or len ( str(value['pattern_structured_values']) ) < 1 :
                         
                         value['extract-value'] = value ['next-match']
@@ -241,20 +315,29 @@ class clsRegex :
                 #마지막 노드인 경우            
                 if cursor > 0 and index == maxindex and value['context_words'] == False :
 
-                    nextX = len( self.vstring  )
+                    nextX = len( value['headrange']  )
 
-                    value ['next-match'] = self.vstring[ value['span'][1] : nextX ]
+                    if value['span'][1] >= nextX : 
+                        value ['next-match'] = value['headrange'][ value['span'][1]: ]
+                    else: 
+                        value ['next-match'] = value['headrange'][ value['span'][1] : nextX ]
+                        
 
                     value ['context'] = context 
 
                   #키-값 추출-----------------------------------------------------------------------------------------------------
                     #키-추출
+
+                    value['extract-keyrange'] = value['match']  
                     if value['key_values'] is None or len ( str(value['key_values']) ) < 1 :
                         value['extract-key'] = value ['match']
                     else:
                         value['extract-key'] = value ['key_values']
 
                     #값-추출
+                    
+                    value['extract-valuerange'] = value ['next-match']
+
                     if value['pattern_structured_values'] is None or len ( str(value['pattern_structured_values']) ) < 1 :
                         
                         value['extract-value'] = value ['next-match']
@@ -352,11 +435,20 @@ class clsRegexExcel:
 
         df.to_excel(output_file, index=False)
 
+    @classmethod
+    def createFolder(self, pfoldername):
+
+        if os.path.exists(pfoldername):
+            pass
+        else:
+            os.makedirs(pfoldername, exist_ok=True)
+            
+        return os.path.abspath(pfoldername)            
+    
 
 
 
-
-def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pExportRowCount=1000 ):
+def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pExportRowCount=1000 , pexportfoldername ='출력결과' ):
 
 
     #패턴식들 수집 ( import patterns )
@@ -387,21 +479,26 @@ def run(pExcelPath_patterns , pExcelPath_rowdata , pstringFieldname_rowdata , pE
         vfieldname_strings =pstringFieldname_rowdata
 
 
-    #기타 전달필드들
+    #기타 전달필드들 (X)
 
 
     
         
     
     now = datetime.now()
-    exportfilename = now.strftime("%Y%m%d%H%M%S")
+    exportfoldername = now.strftime("%Y_%m_%d %H_%M_%S")
+
+    pexportfoldername = pexportfoldername.strip('/')
+
+    clsRegexExcel.createFolder(pexportfoldername +'/'+ exportfoldername)
 
     vresult = []
     vctn =1
     for forstring in vstrings:
         
         
-        exportfilename =  now.strftime("%Y%m%d%H%M%S") + '_' + str(vctn) + '.xlsx' 
+        exportfilename = pexportfoldername + '/'+ exportfoldername + '/export_' + str(vctn) + '.xlsx' 
+
 
         obj = clsRegex( vpatterns , forstring ,vfieldname_strings )
 
